@@ -47,7 +47,7 @@ export function saveSpotifyConfig(config: SpotifyConfig): void {
 
 let cachedSpotifyApi: SpotifyApi | null = null;
 
-export function createSpotifyApi(): SpotifyApi {
+export async function createSpotifyApi(): Promise<SpotifyApi> {
   if (cachedSpotifyApi) {
     return cachedSpotifyApi;
   }
@@ -55,10 +55,25 @@ export function createSpotifyApi(): SpotifyApi {
   const config = loadSpotifyConfig();
 
   if (config.accessToken && config.refreshToken) {
+    // Try to refresh the token proactively
+    try {
+      console.error('Refreshing Spotify access token...');
+      const tokens = await refreshAccessToken(config);
+      config.accessToken = tokens.access_token;
+      if (tokens.refresh_token) {
+        config.refreshToken = tokens.refresh_token;
+      }
+      saveSpotifyConfig(config);
+      console.error('Token refreshed successfully');
+    } catch (error) {
+      console.error('Failed to refresh token:', error);
+      // Continue with existing token and let SDK handle it
+    }
+
     const accessToken = {
       access_token: config.accessToken,
       token_type: 'Bearer',
-      expires_in: 3600 * 24 * 30, // Default to 1 month
+      expires_in: 3600, // 1 hour (standard Spotify token expiration)
       refresh_token: config.refreshToken,
     };
 
@@ -88,6 +103,37 @@ function generateRandomString(length: number): string {
 
 function base64Encode(str: string): string {
   return Buffer.from(str).toString('base64');
+}
+
+async function refreshAccessToken(
+  config: SpotifyConfig,
+): Promise<{ access_token: string; refresh_token?: string }> {
+  const tokenUrl = 'https://accounts.spotify.com/api/token';
+  const authHeader = `Basic ${base64Encode(`${config.clientId}:${config.clientSecret}`)}`;
+
+  const params = new URLSearchParams();
+  params.append('grant_type', 'refresh_token');
+  params.append('refresh_token', config.refreshToken!);
+
+  const response = await fetch(tokenUrl, {
+    method: 'POST',
+    headers: {
+      Authorization: authHeader,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: params,
+  });
+
+  if (!response.ok) {
+    const errorData = await response.text();
+    throw new Error(`Failed to refresh token: ${errorData}`);
+  }
+
+  const data = await response.json();
+  return {
+    access_token: data.access_token,
+    refresh_token: data.refresh_token,
+  };
 }
 
 async function exchangeCodeForToken(
@@ -283,7 +329,7 @@ export async function handleSpotifyRequest<T>(
   action: (spotifyApi: SpotifyApi) => Promise<T>,
 ): Promise<T> {
   try {
-    const spotifyApi = createSpotifyApi();
+    const spotifyApi = await createSpotifyApi();
     return await action(spotifyApi);
   } catch (error) {
     // Skip JSON parsing errors as these are actually successful operations

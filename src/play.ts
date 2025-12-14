@@ -359,6 +359,133 @@ const addToQueue: tool<{
   },
 };
 
+const updatePlaylistDetails: tool<{
+  playlistId: z.ZodString;
+  name: z.ZodOptional<z.ZodString>;
+  description: z.ZodOptional<z.ZodString>;
+  public: z.ZodOptional<z.ZodBoolean>;
+}> = {
+  name: 'updatePlaylistDetails',
+  description: 'Update the name, description, or visibility of a Spotify playlist',
+  schema: {
+    playlistId: z.string().describe('The Spotify ID of the playlist to update'),
+    name: z
+      .string()
+      .optional()
+      .describe('The new name for the playlist'),
+    description: z
+      .string()
+      .optional()
+      .describe('The new description for the playlist'),
+    public: z
+      .boolean()
+      .optional()
+      .describe('Whether the playlist should be public'),
+  },
+  handler: async (args, _extra: SpotifyHandlerExtra) => {
+    const { playlistId, name, description, public: isPublic } = args;
+
+    if (!name && !description && isPublic === undefined) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: 'Error: Must provide at least one field to update (name, description, or public)',
+            isError: true,
+          },
+        ],
+      };
+    }
+
+    await handleSpotifyRequest(async (spotifyApi) => {
+      const updateData: {
+        name?: string;
+        description?: string;
+        public?: boolean;
+      } = {};
+
+      if (name !== undefined) updateData.name = name;
+      if (description !== undefined) updateData.description = description;
+      if (isPublic !== undefined) updateData.public = isPublic;
+
+      await spotifyApi.playlists.changePlaylistDetails(playlistId, updateData);
+    });
+
+    const updatedFields = [];
+    if (name) updatedFields.push(`name to "${name}"`);
+    if (description) updatedFields.push(`description to "${description}"`);
+    if (isPublic !== undefined) updatedFields.push(`visibility to ${isPublic ? 'public' : 'private'}`);
+
+    return {
+      content: [
+        {
+          type: 'text',
+          text: `Successfully updated playlist ${playlistId}: ${updatedFields.join(', ')}`,
+        },
+      ],
+    };
+  },
+};
+
+const removeTracksFromPlaylist: tool<{
+  playlistId: z.ZodString;
+  trackIds: z.ZodArray<z.ZodString>;
+}> = {
+  name: 'removeTracksFromPlaylist',
+  description: 'Remove tracks from a Spotify playlist',
+  schema: {
+    playlistId: z.string().describe('The Spotify ID of the playlist'),
+    trackIds: z.array(z.string()).describe('Array of Spotify track IDs to remove'),
+  },
+  handler: async (args, _extra: SpotifyHandlerExtra) => {
+    const { playlistId, trackIds } = args;
+
+    if (trackIds.length === 0) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: 'Error: No track IDs provided',
+          },
+        ],
+      };
+    }
+
+    try {
+      const trackUris = trackIds.map((id) => ({ uri: `spotify:track:${id}` }));
+
+      await handleSpotifyRequest(async (spotifyApi) => {
+        await spotifyApi.playlists.removeItemsFromPlaylist(
+          playlistId,
+          { tracks: trackUris }
+        );
+      });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Successfully removed ${trackIds.length} track${
+              trackIds.length === 1 ? '' : 's'
+            } from playlist (ID: ${playlistId})`,
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error removing tracks from playlist: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          },
+        ],
+      };
+    }
+  },
+};
+
 export const playTools = [
   playMusic,
   pausePlayback,
@@ -368,4 +495,6 @@ export const playTools = [
   addTracksToPlaylist,
   resumePlayback,
   addToQueue,
+  updatePlaylistDetails,
+  removeTracksFromPlaylist,
 ];
