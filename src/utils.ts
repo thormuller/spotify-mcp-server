@@ -18,9 +18,30 @@ export interface SpotifyConfig {
 }
 
 export function loadSpotifyConfig(): SpotifyConfig {
+  // First, try environment variable (for Cloud Run deployment)
+  const envConfig = process.env.SPOTIFY_CONFIG;
+  if (envConfig) {
+    try {
+      const config = JSON.parse(envConfig);
+      if (!(config.clientId && config.clientSecret && config.redirectUri)) {
+        throw new Error(
+          'Spotify configuration must include clientId, clientSecret, and redirectUri.',
+        );
+      }
+      return config;
+    } catch (error) {
+      throw new Error(
+        `Failed to parse SPOTIFY_CONFIG environment variable: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+
+  // Fall back to file-based config (for local development)
   if (!fs.existsSync(CONFIG_FILE)) {
     throw new Error(
-      `Spotify configuration file not found at ${CONFIG_FILE}. Please create one with clientId, clientSecret, and redirectUri.`,
+      `Spotify configuration not found. Either set SPOTIFY_CONFIG environment variable or create ${CONFIG_FILE} with clientId, clientSecret, and redirectUri.`,
     );
   }
 
@@ -42,6 +63,12 @@ export function loadSpotifyConfig(): SpotifyConfig {
 }
 
 export function saveSpotifyConfig(config: SpotifyConfig): void {
+  // In Cloud Run mode (env var config), we can't save to file
+  // The token will be refreshed per request but won't persist across restarts
+  if (process.env.SPOTIFY_CONFIG) {
+    console.error('Running in Cloud Run mode - token refresh will not persist across restarts');
+    return;
+  }
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), 'utf8');
 }
 
